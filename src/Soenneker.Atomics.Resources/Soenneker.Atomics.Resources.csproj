@@ -44,6 +44,6 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Soenneker.Extensions.ValueTask" Version="4.0.116" />
+        <PackageReference Include="Soenneker.Extensions.ValueTask" Version="4.0.117" />
     </ItemGroup>
 </Project>
