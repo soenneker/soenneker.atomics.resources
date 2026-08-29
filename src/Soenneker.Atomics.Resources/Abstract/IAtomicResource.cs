@@ -3,11 +3,6 @@ using System.Threading.Tasks;
 
 namespace Soenneker.Atomics.Resources.Abstract;
 
-/// <summary>
-/// Thread-safe holder for a single resource that can be lazily created,
-/// atomically reset (swap), and asynchronously torn down.
-/// </summary>
-/// <typeparam name="T">The resource type being managed.</typeparam>
 public interface IAtomicResource<out T> : IAsyncDisposable, IDisposable where T : class
 {
     /// <summary>
@@ -31,8 +26,9 @@ public interface IAtomicResource<out T> : IAsyncDisposable, IDisposable where T 
     /// Atomically replaces the current instance with a freshly created one,
     /// and asynchronously tears down the previous instance (if any).
     /// </summary>
+    /// <returns>A task that completes when the reset operation is complete.</returns>
     /// <remarks>
-    /// After this completes, subsequent <see cref="GetOrCreate"/> calls should return the new instance.
+    /// After this completes, subsequent <see cref="GetOrCreate"/> calls return the replacement instance.
     /// </remarks>
     ValueTask Reset();
 
