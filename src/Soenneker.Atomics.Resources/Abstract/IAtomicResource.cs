@@ -3,6 +3,9 @@ using System.Threading.Tasks;
 
 namespace Soenneker.Atomics.Resources.Abstract;
 
+/// <summary>
+/// Provides thread-safe lazy creation, replacement, and disposal of a reference-type resource.
+/// </summary>
 public interface IAtomicResource<out T> : IAsyncDisposable, IDisposable where T : class
 {
     /// <summary>

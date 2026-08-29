@@ -6,7 +6,7 @@ using Soenneker.Extensions.ValueTask;
 
 namespace Soenneker.Atomics.Resources;
 
-///<inheritdoc cref="IAtomicResource{T}"/>
+/// <inheritdoc cref="IAtomicResource{T}"/>
 public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
 {
     private readonly Func<T> _factory;
