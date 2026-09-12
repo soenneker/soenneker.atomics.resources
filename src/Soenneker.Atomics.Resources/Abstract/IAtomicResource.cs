@@ -12,8 +12,8 @@ public interface IAtomicResource<out T> : IAsyncDisposable, IDisposable where T 
     /// Gets the current instance, creating it if necessary.
     /// </summary>
     /// <remarks>
-    /// Implementations should be safe for concurrent callers and avoid
-    /// duplicate allocations (i.e., publish-at-most-once semantics per reset).
+    /// Concurrent callers share the published resource. Factories may run concurrently;
+    /// candidates that lose publication are torn down.
     /// If the resource has been disposed, this should return <c>null</c>.
     /// </remarks>
     /// <returns>The current instance, or <c>null</c> if disposed.</returns>

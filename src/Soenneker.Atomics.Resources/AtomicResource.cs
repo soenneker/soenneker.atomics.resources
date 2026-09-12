@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Soenneker.Atomics.Resources.Abstract;
@@ -6,13 +7,14 @@ using Soenneker.Extensions.ValueTask;
 
 namespace Soenneker.Atomics.Resources;
 
-/// <inheritdoc cref="IAtomicResource{T}"/>
 public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
 {
     private readonly Func<T> _factory;
     private readonly Func<T, ValueTask> _teardown;
-    private T? _value;
-    private volatile bool _disposed;
+
+    // null, a T, or the terminal disposed sentinel. One atomic publication owns
+    // both lifecycle and value, so creation/reset cannot resurrect a disposed owner.
+    private object? _value;
 
     public AtomicResource(Func<T> factory, Func<T, ValueTask> teardown)
     {
@@ -20,104 +22,115 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
         _teardown = teardown ?? throw new ArgumentNullException(nameof(teardown));
     }
 
-    public bool IsDisposed => _disposed;
+    public bool IsDisposed => ReferenceEquals(Volatile.Read(ref _value), AtomicResourceSentinel.Disposed);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T? GetOrCreate()
     {
-        if (_disposed)
-            return null;
+        object? value = Volatile.Read(ref _value);
+        if (value is null)
+            return Create();
 
-        T? existing = Volatile.Read(ref _value);
-        if (existing is not null)
-            return existing;
+        return Unwrap(value);
+    }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private T? Create()
+    {
         T created = _factory();
-        T? raced = Interlocked.CompareExchange(ref _value, created, null);
-
+        object? raced = Interlocked.CompareExchange(ref _value, created, null);
         if (raced is null)
-        {
-            // We published 'created'; check for a dispose race.
-            if (_disposed)
-            {
-                Interlocked.Exchange(ref _value, null);
-                _ = _teardown(created); // best-effort cleanup (cannot block or await here)
-                return null;
-            }
-
             return created;
-        }
 
-        // Lost the race; tear down our extra
-        _ = _teardown(created);
-        return raced;
+        // Cleanup consumes even source-backed ValueTasks. Disposal owns only the
+        // value it detached; this losing candidate belongs to this creator.
+        _ = Teardown(created);
+        return Unwrap(raced);
     }
 
-    public T? TryGet() => Volatile.Read(ref _value);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public T? TryGet() => Unwrap(Volatile.Read(ref _value));
 
-    public async ValueTask Reset()
+    public ValueTask Reset()
     {
-        if (_disposed)
-            return;
+        object? value = Volatile.Read(ref _value);
+        if (ReferenceEquals(value, AtomicResourceSentinel.Disposed))
+            return default;
 
-        T fresh = _factory();
-        T? old = Interlocked.Exchange(ref _value, fresh);
-
-        if (old is null)
-            return;
-
+        T fresh;
         try
         {
-            await _teardown(old).NoSync();
+            fresh = _factory();
         }
-        catch
+        catch (Exception exception)
         {
-            /* ignore */
+            return ValueTask.FromException(exception);
+        }
+
+        while (true)
+        {
+            if (ReferenceEquals(value, AtomicResourceSentinel.Disposed))
+                return Teardown(fresh);
+
+            object? observed = Interlocked.CompareExchange(ref _value, fresh, value);
+            if (ReferenceEquals(observed, value))
+                return value is null ? default : Teardown((T)value);
+
+            value = observed;
         }
     }
 
-    /// <summary>
-    /// Asynchronously disposes the current resource (if any) using the async teardown.
-    /// Safe to call multiple times.
-    /// </summary>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        _disposed = true;
-        T? old = Interlocked.Exchange(ref _value, null);
-
-        if (old is null)
-            return;
-
-        try
-        {
-            await _teardown(old).NoSync();
-        }
-        catch
-        {
-            /* ignore */
-        }
+        T? old = Detach();
+        return old is null ? default : Teardown(old);
     }
 
-    /// <summary>
-    /// Synchronously disposes the current resource (if any) by blocking on the teardown ValueTask.
-    /// Use when you need deterministic synchronous cleanup (e.g., using-statement).
-    /// </summary>
     public void Dispose()
     {
-        _disposed = true;
-        T? old = Interlocked.Exchange(ref _value, null);
+        T? old = Detach();
+        if (old is not null)
+            Teardown(old).AwaitSync();
+    }
 
-        if (old is null)
-            return;
+    private T? Detach()
+    {
+        if (IsDisposed)
+            return null;
 
+        return Unwrap(Interlocked.Exchange(ref _value, AtomicResourceSentinel.Disposed));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static T? Unwrap(object? value) => ReferenceEquals(value, AtomicResourceSentinel.Disposed) ? null : Unsafe.As<T>(value);
+
+    private ValueTask Teardown(T value)
+    {
         try
         {
-            // Block synchronously without allocating a Task if possible.
-            ValueTask vt = _teardown(old);
-            vt.GetAwaiter().GetResult();
+            ValueTask pending = _teardown(value);
+            if (!pending.IsCompletedSuccessfully)
+                return AwaitTeardown(pending);
+
+            pending.GetAwaiter().GetResult();
         }
         catch
         {
-            /* ignore */
+            // Cleanup is best effort, including synchronous callback failures.
+        }
+
+        return default;
+    }
+
+    private static async ValueTask AwaitTeardown(ValueTask pending)
+    {
+        try
+        {
+            await pending.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Preserve best-effort cleanup for asynchronously failing callbacks.
         }
     }
 }
