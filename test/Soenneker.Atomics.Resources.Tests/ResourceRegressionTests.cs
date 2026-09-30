@@ -12,7 +12,7 @@ public sealed class ResourceRegressionTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task Dispose_during_creation_or_reset_cleans_up_once(bool reset)
+    public async ValueTask Dispose_during_creation_or_reset_cleans_up_once(bool reset)
     {
         using var entered = new ManualResetEventSlim();
         using var proceed = new ManualResetEventSlim();
@@ -49,7 +49,7 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async Task Concurrent_reset_and_dispose_clean_up_every_candidate_once()
+    public async ValueTask Concurrent_reset_and_dispose_clean_up_every_candidate_once()
     {
         var created = new ConcurrentBag<object>();
         var cleaned = new ConcurrentDictionary<object, int>();
@@ -74,7 +74,7 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async Task Completed_source_backed_teardown_is_consumed()
+    public async ValueTask Completed_source_backed_teardown_is_consumed()
     {
         var source = new CleanupSource();
         var resource = new AtomicResource<object>(static () => new object(), _ => source.Task);
@@ -84,7 +84,7 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async Task Synchronous_disposal_waits_for_async_teardown()
+    public async ValueTask Synchronous_disposal_waits_for_async_teardown()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,7 +111,7 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async Task Synchronous_disposal_waits_for_a_pending_value_task_source()
+    public async ValueTask Synchronous_disposal_waits_for_a_pending_value_task_source()
     {
         var source = new PendingCleanupSource();
         var resource = new AtomicResource<object>(static () => new object(), _ => source.Task);
