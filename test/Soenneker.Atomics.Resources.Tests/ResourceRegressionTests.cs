@@ -12,7 +12,7 @@ public sealed class ResourceRegressionTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async ValueTask Dispose_during_creation_or_reset_cleans_up_once(bool reset)
+    public async ValueTask Dispose_during_creation_or_reset_cleans_up_once(bool reset, CancellationToken cancellationToken)
     {
         using var entered = new ManualResetEventSlim();
         using var proceed = new ManualResetEventSlim();
@@ -20,7 +20,7 @@ public sealed class ResourceRegressionTests
         var resource = new AtomicResource<object>(() =>
         {
             entered.Set();
-            if (!proceed.Wait(TimeSpan.FromSeconds(5)))
+            if (!proceed.Wait(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken))
                 throw new TimeoutException();
             return new object();
         }, _ => { Interlocked.Increment(ref cleanups); return default; });
@@ -31,17 +31,17 @@ public sealed class ResourceRegressionTests
                 await resource.Reset();
             else
                 _ = resource.GetOrCreate();
-        });
+        }, cancellationToken: cancellationToken);
         try
         {
-            await Assert.That(entered.Wait(TimeSpan.FromSeconds(5))).IsTrue();
+            await Assert.That(entered.Wait(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken)).IsTrue();
             await resource.DisposeAsync();
         }
         finally
         {
             proceed.Set();
         }
-        await worker.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken);
         await resource.DisposeAsync();
         await Assert.That(cleanups).IsEqualTo(1);
         await Assert.That(resource.TryGet()).IsNull();
@@ -49,7 +49,7 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async ValueTask Concurrent_reset_and_dispose_clean_up_every_candidate_once()
+    public async ValueTask Concurrent_reset_and_dispose_clean_up_every_candidate_once(CancellationToken cancellationToken)
     {
         var created = new ConcurrentBag<object>();
         var cleaned = new ConcurrentDictionary<object, int>();
@@ -64,17 +64,17 @@ public sealed class ResourceRegressionTests
         {
             for (int i = 0; i < 1000; i++)
                 await resource.Reset();
-        })).ToArray();
+        }, cancellationToken: cancellationToken)).ToArray();
         await Task.Yield();
         await resource.DisposeAsync();
-        await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken);
         await Assert.That(cleaned.Count).IsEqualTo(created.Count);
         await Assert.That(cleaned.Values.All(static count => count == 1)).IsTrue();
         await Assert.That(resource.TryGet()).IsNull();
     }
 
     [Test]
-    public async ValueTask Completed_source_backed_teardown_is_consumed()
+    public async ValueTask Completed_source_backed_teardown_is_consumed(CancellationToken cancellationToken)
     {
         var source = new CleanupSource();
         var resource = new AtomicResource<object>(static () => new object(), _ => source.Task);
@@ -84,7 +84,7 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async ValueTask Synchronous_disposal_waits_for_async_teardown()
+    public async ValueTask Synchronous_disposal_waits_for_async_teardown(CancellationToken cancellationToken)
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -94,11 +94,11 @@ public sealed class ResourceRegressionTests
             await release.Task;
         });
         _ = resource.GetOrCreate();
-        Task disposal = Task.Run(resource.Dispose);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task disposal = Task.Run(resource.Dispose, cancellationToken: cancellationToken);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken);
         await Assert.That(disposal.IsCompleted).IsFalse();
         release.SetResult();
-        await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposal.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken);
     }
 
     private sealed class CleanupSource : IValueTaskSource
@@ -111,22 +111,22 @@ public sealed class ResourceRegressionTests
     }
 
     [Test]
-    public async ValueTask Synchronous_disposal_waits_for_a_pending_value_task_source()
+    public async ValueTask Synchronous_disposal_waits_for_a_pending_value_task_source(CancellationToken cancellationToken)
     {
         var source = new PendingCleanupSource();
         var resource = new AtomicResource<object>(static () => new object(), _ => source.Task);
         _ = resource.GetOrCreate();
-        Task disposal = System.Threading.Tasks.Task.Run(resource.Dispose);
+        Task disposal = System.Threading.Tasks.Task.Run(resource.Dispose, cancellationToken: cancellationToken);
         try
         {
-            await System.Threading.Tasks.Task.WhenAny(disposal, source.Registered.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            await System.Threading.Tasks.Task.WhenAny(disposal, source.Registered.Task).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken);
             await Assert.That(disposal.IsCompleted).IsFalse();
         }
         finally
         {
             source.Complete();
         }
-        await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+        await disposal.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: cancellationToken);
         await Assert.That(source.Consumptions).IsEqualTo(1);
     }
 
