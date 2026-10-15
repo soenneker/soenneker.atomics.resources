@@ -39,6 +39,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Soenneker.Atomics.ValueResources" Version="4.0.1" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Include="..\..\README.md" Pack="true" PackagePath="\" />
         <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
         <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
