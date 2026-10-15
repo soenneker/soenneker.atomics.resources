@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Soenneker.Atomics.Resources.Abstract;
-using Soenneker.Extensions.ValueTask;
 
 namespace Soenneker.Atomics.Resources;
 
@@ -37,7 +36,7 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
     [MethodImpl(MethodImplOptions.NoInlining)]
     private T? Create()
     {
-        T created = _factory();
+        T created = _factory() ?? throw new InvalidOperationException("The resource factory returned null.");
         object? raced = Interlocked.CompareExchange(ref _value, created, null);
         if (raced is null)
             return created;
@@ -60,7 +59,7 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
         T fresh;
         try
         {
-            fresh = _factory();
+            fresh = _factory() ?? throw new InvalidOperationException("The resource factory returned null.");
         }
         catch (Exception exception)
         {
@@ -74,7 +73,7 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
 
             object? observed = Interlocked.CompareExchange(ref _value, fresh, value);
             if (ReferenceEquals(observed, value))
-                return value is null ? default : Teardown((T)value);
+                return value is null ? default : Teardown(Unsafe.As<T>(value)!);
 
             value = observed;
         }
@@ -90,7 +89,9 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
     {
         T? old = Detach();
         if (old is not null)
-            Teardown(old).AwaitSync();
+            // Teardown consumes source-backed tasks and wraps pending cleanup in a task-backed
+            // async ValueTask, whose GetResult safely blocks until cleanup completes.
+            Teardown(old).GetAwaiter().GetResult();
     }
 
     private T? Detach()
