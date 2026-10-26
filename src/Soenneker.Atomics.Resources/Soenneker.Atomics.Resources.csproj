@@ -39,7 +39,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Soenneker.Atomics.ValueResources" Version="4.0.1" />
+        <PackageReference Include="Soenneker.Atomics.ValueResources" Version="11.0.2" />
     </ItemGroup>
 
     <ItemGroup>
